@@ -3,7 +3,7 @@ name: Generate release
 on:
   workflow_dispatch: # only generate the artefacts on demand
   # pull_request:
-  # push:
+  push:
 
 jobs:
   build-and-test:
