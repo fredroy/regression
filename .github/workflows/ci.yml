@@ -3,7 +3,7 @@ name: Generate release
 on:
   workflow_dispatch: # only generate the artefacts on demand
   # pull_request:
-  # push:
+  push:
   schedule:
     - cron:  '0 0 * * *' # nightly job at midnight UTC
 
@@ -11,34 +11,16 @@ jobs:
   build-and-test:
     name: Run on ${{ matrix.os }} with SOFA ${{ matrix.sofa_branch }}
     runs-on: ${{ matrix.os }}
-    continue-on-error: true # as macos is always failing...
     strategy:
       fail-fast: false
       matrix:
-        os: [ubuntu-20.04, macos-11, windows-2019]
+        os: [macos-12]
         sofa_branch: [master]
 
-    steps:
-      - name: (Mac) Workaround for homebrew
-        shell: bash
-        if: runner.os == 'macOS'
-        run: |
-            rm -f /usr/local/bin/2to3
-            rm -f /usr/local/bin/idle3
-            rm -f /usr/local/bin/pydoc3
-            rm -f /usr/local/bin/python3
-            rm -f /usr/local/bin/python3-config
-            rm -f /usr/local/bin/2to3-3.11
-            rm -f /usr/local/bin/idle3.11
-            rm -f /usr/local/bin/pydoc3.11
-            rm -f /usr/local/bin/python3.11
-            rm -f /usr/local/bin/python3.11-config
-            rm -f /usr/local/bin/go
-            rm -f /usr/local/bin/gofmt
-            
+    steps:            
       - name: Setup SOFA and environment
         id: sofa
-        uses: sofa-framework/sofa-setup-action@v4
+        uses: fredroy/sofa-setup-action@v4_update_python_action
         with:
           sofa_root: ${{ github.workspace }}/sofa
           sofa_version: ${{ matrix.sofa_branch }}
@@ -114,7 +96,7 @@ jobs:
         with:
           name: ${{ github.ref_name }}
           tag_name: release-${{ github.ref_name }}
-          fail_on_unmatched_files: false # as macos is always failing...
+          fail_on_unmatched_files: false
           files: |
             artifacts/Regression_test_*_Linux.zip
             artifacts/Regression_test_*_Windows.zip
