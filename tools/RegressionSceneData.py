@@ -247,6 +247,14 @@ class RegressionSceneData:
             if simu_time == keyframes[frame_step]:
                 for meca_id in range(0, nbr_meca):
                     meca_dofs = np.copy(self.meca_objs[meca_id].position.value)
+                    ref_meca_dofs_size = np.asarray(numpy_data[meca_id][str(keyframes[frame_step])]).size
+                    if meca_dofs.size != ref_meca_dofs_size:
+                        print(f'[Error] Object {self.meca_objs[meca_id].linkpath} : '
+                              f'Size of the reference DOFs ({ref_meca_dofs_size}) '
+                              f'and size of the actual DOFs ({meca_dofs.size}) is inconsistent.')
+                        self.regression_failed = True
+                        return False
+
                     data_ref = np.asarray(numpy_data[meca_id][str(keyframes[frame_step])]) - meca_dofs
                     
                     # Compute total distance between the 2 sets
