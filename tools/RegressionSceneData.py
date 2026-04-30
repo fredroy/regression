@@ -371,7 +371,7 @@ class RegressionSceneData:
 
         # Final regression returns value
         for meca_id in range(nbr_meca):
-            if self.total_error[meca_id] > self.epsilon:
+            if self.error_by_dof[meca_id] > self.epsilon:
                 self.regression_failed = True
                 return False
 
