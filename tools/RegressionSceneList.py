@@ -1,9 +1,9 @@
 import os
 import tools.RegressionSceneData as RegressionSceneData
 import tools.RegressionHelper as helper
-from tqdm import tqdm
-import re
+from tools import ProgressBarHandler as pbh
 
+import re
 
 ## This class is responsible for loading a file.regression-tests to gather the list of scene to test with all arguments
 ## It will provide the API to launch the tests or write refs on all scenes contained in this file
@@ -108,12 +108,14 @@ class RegressionSceneList:
 
     def write_all_references(self):
         nbr_scenes = len(self.scenes_data_sets)
-        pbar_scenes = tqdm(total=nbr_scenes, disable=self.disable_progress_bar)
+
+        pbar_scenes = pbh.ProgressBarHandler(total=self.nbr_scenes, disable=self.disable_progress_bar)
         pbar_scenes.set_description("Write all scenes from: " + self.file_path)
         
         for i in range(0, nbr_scenes):
             self.write_references(i)
             pbar_scenes.update(1)
+
         pbar_scenes.close()
         
         return nbr_scenes
@@ -140,7 +142,7 @@ class RegressionSceneList:
 
     def compare_all_references(self):
         nbr_scenes = len(self.scenes_data_sets)
-        pbar_scenes = tqdm(total=nbr_scenes, disable=self.disable_progress_bar)
+        pbar_scenes = pbh.ProgressBarHandler(total=nbr_scenes, disable=self.disable_progress_bar)
         pbar_scenes.set_description("Compare all scenes from: " + self.file_path)
         
         for i in range(0, nbr_scenes):

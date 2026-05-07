@@ -1,10 +1,12 @@
-from tqdm import tqdm
 import numpy as np
 import pathlib
 
 import tools.ReferenceFileIO as reference_io
 import tools.RegressionHelper as helper
 import Sofa
+
+from tools import ProgressBarHandler as pbh
+
 
 def is_simulated(node):
     if node.hasODESolver():
@@ -173,7 +175,7 @@ class RegressionSceneData:
         
 
     def write_references(self, format = "JSON"):
-        pbar_simu = tqdm(total=self.steps, disable=self.disable_progress_bar)
+        pbar_simu = pbh.ProgressBarHandler(total=self.steps, disable=self.disable_progress_bar)
         pbar_simu.set_description("Simulate: " + self.file_scene_path)
 
         # compute stepping parameters for the simulation
@@ -231,7 +233,7 @@ class RegressionSceneData:
 
 
     def compare_references(self, format = "JSON"):
-        pbar_simu = tqdm(total=float(self.steps), disable=self.disable_progress_bar)
+        pbar_simu = pbh.ProgressBarHandler(total=float(self.steps), disable=self.disable_progress_bar)
         pbar_simu.set_description("compare_references: " + self.file_scene_path)
 
         nbr_meca = len(self.meca_objs)
@@ -380,7 +382,7 @@ class RegressionSceneData:
 
 
     def compare_legacy_references(self):
-        pbar_simu = tqdm(total=float(self.steps), disable=self.disable_progress_bar)
+        pbar_simu = pbh.ProgressBarHandler(total=float(self.steps), disable=self.disable_progress_bar)
         pbar_simu.set_description("compare_legacy_references: " + self.file_scene_path)
 
         nbr_meca = len(self.meca_objs)

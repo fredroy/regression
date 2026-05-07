@@ -3,8 +3,6 @@ import argparse
 import sys
 import numpy as np
 
-from tqdm import tqdm
-
 if "SOFA_ROOT" not in os.environ:
     print('SOFA_ROOT environment variable has not been detected, quitting.')
     exit(1)
@@ -15,6 +13,7 @@ else:
 import Sofa
 import SofaRuntime # importing SofaRuntime will add the py3 loader to the scene loaders
 import tools.RegressionSceneList as RegressionSceneList
+from tools import ProgressBarHandler as pbh
 
 regression_file_extension = ".regression-tests"
 
@@ -60,7 +59,8 @@ class RegressionProgram:
 
     def write_all_sets_references(self):
         nbr_sets = len(self.scene_sets)
-        pbar_sets = tqdm(total=nbr_sets, disable=self.disable_progress_bar)
+
+        pbar_sets = pbh.ProgressBarHandler(total=self.nbr_sets, disable=args.disable_progress_bar)
         pbar_sets.set_description("Write All sets")
 
         nbr_scenes = 0
@@ -68,7 +68,8 @@ class RegressionProgram:
             nbr_scenes = nbr_scenes + self.write_sets_references(i)
             pbar_sets.update(1)
 
-        pbar_sets.close()
+        if not self.disable_progress_bar:
+            pbar_sets.close()
 
         return nbr_scenes
 
@@ -80,7 +81,7 @@ class RegressionProgram:
 
     def compare_all_sets_references(self):
         nbr_sets = len(self.scene_sets)
-        pbar_sets = tqdm(total=nbr_sets, disable=self.disable_progress_bar)
+        pbar_sets = pbh.ProgressBarHandler(total=nbr_sets, disable=self.disable_progress_bar)
         pbar_sets.set_description("Compare All sets")
 
         nbr_scenes = 0
