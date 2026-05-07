@@ -152,6 +152,10 @@ class RegressionSceneList:
 
 
     def replay_references(self, id_scene):
+        if (id_scene < 0 or id_scene >= len(self.scenes_data_sets)):
+            helper.writeError(f'Id of the scene given for replay: {id_scene} is out of range [0, {len(self.scenes_data_sets) - 1}] from input regression list file.')
+            return
+
         self.scenes_data_sets[id_scene].load_scene()
         self.scenes_data_sets[id_scene].add_compare_state()
         self.scenes_data_sets[id_scene].replay_references()

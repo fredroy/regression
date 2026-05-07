@@ -30,10 +30,7 @@ class ReplayState(Sofa.Core.Controller):
         self.frame_step = 0
         self.t_sim = 0.0
 
-        with gzip.open(state_filename, 'r') as zipfile:
-            self.ref_data = json.loads(zipfile.read().decode('utf-8'))
-            for key in self.ref_data:
-                self.keyframes.append(float(key))
+        self.ref_data, self.keyframes = reference_io.read_JSON_reference_file(state_filename)
         
         if (self.keyframes[0] == 0.0): # frame 0.0
             tmp_position = np.asarray(self.ref_data[str(self.keyframes[0])])
