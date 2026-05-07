@@ -1,3 +1,4 @@
+import time
 import numpy as np
 import pathlib
 
@@ -30,10 +31,7 @@ class ReplayState(Sofa.Core.Controller):
         self.frame_step = 0
         self.t_sim = 0.0
 
-        with gzip.open(state_filename, 'r') as zipfile:
-            self.ref_data = json.loads(zipfile.read().decode('utf-8'))
-            for key in self.ref_data:
-                self.keyframes.append(float(key))
+        self.ref_data, self.keyframes = reference_io.read_JSON_reference_file(state_filename)
         
         if (self.keyframes[0] == 0.0): # frame 0.0
             tmp_position = np.asarray(self.ref_data[str(self.keyframes[0])])
@@ -92,13 +90,14 @@ class RegressionSceneData:
         self.root_node = None
         self.disable_progress_bar = disable_progress_bar
         self.verbose = verbose
+        self.total_run_time = 0
 
     def print_info(self):
         helper.writeLog("Test scene: " + self.file_scene_path + " vs " + self.file_ref_path + " using: " + str(self.steps)
               + " " + str(self.epsilon))
         
     def log_errors(self):
-        if self.regression_failed is True:
+        if self.regression_failed:
             helper.writeError(
                                 f"{self.file_scene_path} | Number of key frames compared: {self.nbr_tested_frame}"
                                 f"\n    ### Error by dof: {self.error_by_dof} > Threshold: {self.epsilon}"
@@ -107,7 +106,7 @@ class RegressionSceneData:
         elif self.nbr_tested_frame == 0:
             helper.writeError(f"No frames were tested for {self.file_scene_path}")
         else:
-            helper.writeSuccess(f"{self.file_scene_path} | Number of key frames compared: {self.nbr_tested_frame}")
+            helper.writeSuccess(f"{self.file_scene_path} | Number of key frames compared: {self.nbr_tested_frame} | run time: {self.total_run_time/1e9} seconds. ")
 
     def print_meca_objs(self):
         helper.writeLog("# Nbr Meca: " + str(len(self.meca_objs)))
@@ -366,7 +365,9 @@ class RegressionSceneData:
                 if frame_step == nbr_frames:
                     break
 
+            start_time = time.time_ns()
             Sofa.Simulation.animate(self.root_node, dt)
+            self.total_run_time += time.time_ns() - start_time
 
             pbar_simu.update(1)
         pbar_simu.close()
