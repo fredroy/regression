@@ -99,7 +99,7 @@ class RegressionSceneData:
     def log_errors(self):
         if self.regression_failed:
             helper.writeError(
-                                f"{self.file_scene_path} | Number of key frames compared: {self.nbr_tested_frame}"
+                                f"{self.file_scene_path} | Number of key frames compared: {self.nbr_tested_frame}  | run time: {self.total_run_time/1e9} seconds. "
                                 f"\n    ### Error by dof: {self.error_by_dof} > Threshold: {self.epsilon}"
                                 f"\n    ### Total Error: {self.total_error}"
                             )
