@@ -109,7 +109,7 @@ class RegressionSceneList:
     def write_all_references(self):
         nbr_scenes = len(self.scenes_data_sets)
 
-        pbar_scenes = pbh.ProgressBarHandler(total=self.nbr_scenes, disable=self.disable_progress_bar)
+        pbar_scenes = pbh.ProgressBarHandler(total=nbr_scenes, disable=self.disable_progress_bar)
         pbar_scenes.set_description("Write all scenes from: " + self.file_path)
         
         for i in range(0, nbr_scenes):

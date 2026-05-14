@@ -60,7 +60,7 @@ class RegressionProgram:
     def write_all_sets_references(self):
         nbr_sets = len(self.scene_sets)
 
-        pbar_sets = pbh.ProgressBarHandler(total=self.nbr_sets, disable=args.disable_progress_bar)
+        pbar_sets = pbh.ProgressBarHandler(total=nbr_sets, disable=self.disable_progress_bar)
         pbar_sets.set_description("Write All sets")
 
         nbr_scenes = 0
