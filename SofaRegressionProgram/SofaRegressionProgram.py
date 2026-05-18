@@ -1,6 +1,7 @@
 import os
 import argparse
 import sys
+import multiprocessing
 import numpy as np
 
 if "SOFA_ROOT" not in os.environ:
@@ -18,7 +19,7 @@ from tools import ProgressBarHandler as pbh
 regression_file_extension = ".regression-tests"
 
 class RegressionProgram:
-    def __init__(self, input_folder, filter = None, disable_progress_bar = False, verbose = False):
+    def __init__(self, input_folder, filter = None, disable_progress_bar = False, verbose = False, parallel = 1):
         """Initialize the RegressionProgram
 
         Args:
@@ -26,11 +27,13 @@ class RegressionProgram:
             filter (str): Regex pattern to filter scene files (e.g., '^demo.*.scn$'). If None, no filter is applied. Defaults to None.
             disable_progress_bar (bool, optional): If True, disable progress bars. Defaults to False.
             verbose (bool, optional): If True, enable verbose output. Defaults to False.
+            parallel (int, optional): Number of parallel processes. Defaults to 1 (sequential).
         """
         self.scene_sets = []  # List <RegressionSceneList>
         self.disable_progress_bar = disable_progress_bar
         self.verbose = verbose
         self.legacy_mode = False
+        self.parallel = parallel
 
         for root, dirs, files in os.walk(input_folder):
             for file in files:
@@ -60,13 +63,22 @@ class RegressionProgram:
     def write_all_sets_references(self):
         nbr_sets = len(self.scene_sets)
 
+        pool = None
+        if self.parallel > 1:
+            pool = multiprocessing.Pool(processes=self.parallel)
+
         pbar_sets = pbh.ProgressBarHandler(total=nbr_sets, disable=self.disable_progress_bar)
         pbar_sets.set_description("Write All sets")
 
         nbr_scenes = 0
         for i in range(0, nbr_sets):
-            nbr_scenes = nbr_scenes + self.write_sets_references(i)
+            scene_list = self.scene_sets[i]
+            nbr_scenes = nbr_scenes + scene_list.write_all_references(pool=pool)
             pbar_sets.update(1)
+
+        if pool is not None:
+            pool.close()
+            pool.join()
 
         if not self.disable_progress_bar:
             pbar_sets.close()
@@ -81,13 +93,24 @@ class RegressionProgram:
 
     def compare_all_sets_references(self):
         nbr_sets = len(self.scene_sets)
+
+        pool = None
+        if self.parallel > 1:
+            pool = multiprocessing.Pool(processes=self.parallel)
+
         pbar_sets = pbh.ProgressBarHandler(total=nbr_sets, disable=self.disable_progress_bar)
         pbar_sets.set_description("Compare All sets")
 
         nbr_scenes = 0
         for i in range(0, nbr_sets):
-            nbr_scenes = nbr_scenes + self.compare_sets_references(i)
+            scene_list = self.scene_sets[i]
+            scene_list.legacy_mode = self.legacy_mode
+            nbr_scenes = nbr_scenes + scene_list.compare_all_references(pool=pool)
             pbar_sets.update(1)
+
+        if pool is not None:
+            pool.close()
+            pool.join()
 
         pbar_sets.close()
 
@@ -157,25 +180,35 @@ def make_parser():
         help='If set, will read old format regression files',
         action='store_true'
     )
+    parser.add_argument(
+        "-j", "--parallel",
+        dest="parallel",
+        help='Number of parallel processes for running regression tests. Default is 1 (sequential).',
+        type=int,
+        default=1
+    )
 
     parser.epilog = '''
 Examples:
     python SofaRegressionProgram.py --input ./scenes
     python SofaRegressionProgram.py --input ./scenes --filter \"$demo.*.scn\"
     python SofaRegressionProgram.py --input ./scenes --replay 5
+    python SofaRegressionProgram.py --input ./scenes -j 4
         '''
 
     return parser
 
 
 if __name__ == '__main__':
+    multiprocessing.set_start_method('spawn')
+
     # 1- Parse arguments to get folder path
     parser = make_parser()
     args = parser.parse_args()
 
     # 2- Process file
     if args.input is not None:
-        reg_prog = RegressionProgram(args.input, args.filter, args.progress_bar_is_disabled, args.verbose)
+        reg_prog = RegressionProgram(args.input, args.filter, args.progress_bar_is_disabled, args.verbose, args.parallel)
     else:
         parser.print_help()
         exit("Error: Argument is required ! Quitting.")

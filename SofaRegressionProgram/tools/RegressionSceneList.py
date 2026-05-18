@@ -106,18 +106,48 @@ class RegressionSceneList:
             
         self.scenes_data_sets[id_scene].write_references()
 
-    def write_all_references(self):
+    def write_all_references(self, pool=None):
         nbr_scenes = len(self.scenes_data_sets)
+
+        if pool is not None:
+            return self._write_all_references_parallel(pool)
 
         pbar_scenes = pbh.ProgressBarHandler(total=nbr_scenes, disable=self.disable_progress_bar)
         pbar_scenes.set_description("Write all scenes from: " + self.file_path)
-        
+
         for i in range(0, nbr_scenes):
             self.write_references(i)
             pbar_scenes.update(1)
 
         pbar_scenes.close()
-        
+
+        return nbr_scenes
+
+    def _write_all_references_parallel(self, pool):
+        from tools.parallel_worker import write_scene_worker
+
+        tasks = []
+        for scene_data in self.scenes_data_sets:
+            tasks.append((
+                scene_data.file_scene_path,
+                scene_data.file_ref_path,
+                scene_data.steps,
+                scene_data.epsilon,
+                scene_data.meca_in_mapping,
+                scene_data.dump_number_step,
+                self.verbose,
+            ))
+
+        nbr_scenes = len(tasks)
+        pbar_scenes = pbh.ProgressBarHandler(total=nbr_scenes, disable=self.disable_progress_bar)
+        pbar_scenes.set_description("Write all scenes from: " + self.file_path)
+
+        for result in pool.imap_unordered(write_scene_worker, tasks):
+            if result['load_error'] is not None:
+                helper.writeError(f"While trying to load: {result['load_error']}")
+            pbar_scenes.update(1)
+
+        pbar_scenes.close()
         return nbr_scenes
 
 
@@ -140,17 +170,69 @@ class RegressionSceneList:
                 self.nbr_errors = self.nbr_errors + 1
         
 
-    def compare_all_references(self):
+    def compare_all_references(self, pool=None):
         nbr_scenes = len(self.scenes_data_sets)
+
+        if pool is not None:
+            return self._compare_all_references_parallel(pool)
+
         pbar_scenes = pbh.ProgressBarHandler(total=nbr_scenes, disable=self.disable_progress_bar)
         pbar_scenes.set_description("Compare all scenes from: " + self.file_path)
-        
+
         for i in range(0, nbr_scenes):
             self.compare_references(i)
             pbar_scenes.update(1)
         pbar_scenes.close()
 
         return nbr_scenes
+
+    def _compare_all_references_parallel(self, pool):
+        from tools.parallel_worker import compare_scene_worker
+
+        tasks = []
+        for scene_data in self.scenes_data_sets:
+            tasks.append((
+                scene_data.file_scene_path,
+                scene_data.file_ref_path,
+                scene_data.steps,
+                scene_data.epsilon,
+                scene_data.meca_in_mapping,
+                scene_data.dump_number_step,
+                self.legacy_mode,
+                self.verbose,
+            ))
+
+        nbr_scenes = len(tasks)
+        pbar_scenes = pbh.ProgressBarHandler(total=nbr_scenes, disable=self.disable_progress_bar)
+        pbar_scenes.set_description("Compare all scenes from: " + self.file_path)
+
+        for i, result in enumerate(pool.imap_unordered(compare_scene_worker, tasks)):
+            if result['load_error'] is not None:
+                self.nbr_errors += 1
+                helper.writeError(f"While trying to load: {result['load_error']}")
+            elif result['regression_failed']:
+                self.nbr_errors += 1
+                scene_data = self.scenes_data_sets[self._find_scene_index(result['file_scene_path'])]
+                scene_data.regression_failed = True
+                scene_data.error_by_dof = result['error_by_dof']
+                scene_data.total_error = result['total_error']
+                scene_data.nbr_tested_frame = result['nbr_tested_frame']
+                scene_data.total_run_time = result['total_run_time']
+            else:
+                idx = self._find_scene_index(result['file_scene_path'])
+                scene_data = self.scenes_data_sets[idx]
+                scene_data.nbr_tested_frame = result['nbr_tested_frame']
+                scene_data.total_run_time = result['total_run_time']
+            pbar_scenes.update(1)
+
+        pbar_scenes.close()
+        return nbr_scenes
+
+    def _find_scene_index(self, file_scene_path):
+        for i, scene_data in enumerate(self.scenes_data_sets):
+            if scene_data.file_scene_path == file_scene_path:
+                return i
+        return -1
 
 
     def replay_references(self, id_scene):
