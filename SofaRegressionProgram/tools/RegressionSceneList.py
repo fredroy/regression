@@ -5,6 +5,16 @@ import tools.RegressionWorker as RegressionWorker
 
 import re
 
+## Optional trailing options of a scene line. They describe a "case": the same scene
+## run with arguments, which owns its own set of references.
+CASE_OPTION = "--case"
+ARGS_OPTION = "--args"
+SCENE_LINE_OPTIONS = (CASE_OPTION, ARGS_OPTION)
+
+## The case name is appended to the reference path, so it must stay a usable file name.
+CASE_NAME_PATTERN = re.compile(r"^[A-Za-z0-9_.-]+$")
+
+
 ## This class is responsible for loading a file.regression-tests to gather the list of scene to test with all arguments
 ## It will provide the API to launch the tests or write refs on all scenes contained in this file
 class RegressionSceneList:
@@ -20,6 +30,7 @@ class RegressionSceneList:
         self.nbr_errors = 0
         self.nbr_parsing_errors = 0 # number of lines of the list file that could not be used
         self.ref_dir_path = None
+        self.used_ref_paths = {} # reference path -> line number, to detect two scenes sharing references
         self.disable_progress_bar = disable_progress_bar
         self.verbose = verbose
         self.legacy_mode = False
@@ -53,6 +64,83 @@ class RegressionSceneList:
         helper.writeError(f"{self.file_path}:{line_number}: {message}")
 
 
+    def parse_case_options(self, values, line_number):
+        """Split a scene line into its positional fields and its optional case.
+
+        A case is described by the trailing options `--case <name>` and
+        `--args <arg> [<arg>...]`. `--args` gathers every following field until the
+        end of the line or the next option, so a scene argument must never be
+        spelled `--case` or `--args`.
+
+        Args:
+            values (list): the whitespace separated fields of the line.
+            line_number (int): line number in the list file, for error reporting.
+
+        Returns:
+            tuple: (positional fields, case name or None, list of scene arguments),
+            or None if the case is invalid. In that case the error has already been
+            reported.
+        """
+        option_indices = [i for i, value in enumerate(values) if value in SCENE_LINE_OPTIONS]
+        if not option_indices:
+            return values, None, []
+
+        positional = values[:option_indices[0]]
+        case_name = None
+        scene_args = []
+        args_option_seen = False
+
+        index = option_indices[0]
+        while index < len(values):
+            option = values[index]
+            index = index + 1
+
+            if option == CASE_OPTION:
+                if case_name is not None:
+                    self.parsing_error(line_number, f"{CASE_OPTION} is given more than once. "
+                                                    f"Skipping this scene.")
+                    return None
+                if index >= len(values) or values[index] in SCENE_LINE_OPTIONS:
+                    self.parsing_error(line_number, f"{CASE_OPTION} requires a name. "
+                                                    f"Skipping this scene.")
+                    return None
+                case_name = values[index]
+                index = index + 1
+                if CASE_NAME_PATTERN.match(case_name) is None:
+                    # The name ends up in the reference file names, hence the restriction.
+                    self.parsing_error(line_number, f"invalid case name '{case_name}': only letters, "
+                                                    f"digits, '_', '.' and '-' are allowed. "
+                                                    f"Skipping this scene.")
+                    return None
+            else: # ARGS_OPTION
+                if args_option_seen:
+                    self.parsing_error(line_number, f"{ARGS_OPTION} is given more than once. "
+                                                    f"Skipping this scene.")
+                    return None
+                args_option_seen = True
+                while index < len(values) and values[index] not in SCENE_LINE_OPTIONS:
+                    scene_args.append(values[index])
+                    index = index + 1
+                if not scene_args:
+                    self.parsing_error(line_number, f"{ARGS_OPTION} requires at least one argument. "
+                                                    f"Skipping this scene.")
+                    return None
+
+        if scene_args and case_name is None:
+            # Without a case name the run would write over the references of the
+            # scene run without arguments, silently invalidating both.
+            self.parsing_error(line_number, f"{ARGS_OPTION} requires {CASE_OPTION} <name>, which names "
+                                            f"the set of references of this case. Skipping this scene.")
+            return None
+
+        if not positional:
+            self.parsing_error(line_number, f"missing scene path before {values[option_indices[0]]}. "
+                                            f"Skipping this scene.")
+            return None
+
+        return positional, case_name, scene_args
+
+
     def parse_scene_line(self, values, line_number):
         """Parse one scene line of the list file.
 
@@ -65,9 +153,17 @@ class RegressionSceneList:
             invalid. In that case the error has already been reported.
         """
         expected_fields = "<scene path> <steps> <epsilon> <meca_in_mapping> <dump_number_step>"
+        expected_options = f"[{CASE_OPTION} <name>] [{ARGS_OPTION} <arg> ...]"
+
+        parsed_options = self.parse_case_options(values, line_number)
+        if parsed_options is None:
+            return None
+        values, case_name, scene_args = parsed_options
+
         if len(values) > 5:
             helper.writeWarning(f"{self.file_path}:{line_number}: expecting at most 5 fields "
-                                f"({expected_fields}), got {len(values)}. Extra fields are ignored.")
+                                f"({expected_fields} {expected_options}), got {len(values)}. "
+                                f"Extra fields are ignored.")
 
         steps = 1000
         epsilon = 0.0001
@@ -136,11 +232,33 @@ class RegressionSceneList:
                                             f"Skipping this scene.")
             return None
 
+        scene_extension = os.path.splitext(full_file_path)[1].lower()
+        if scene_args and scene_extension not in RegressionSceneData.PYTHON_SCENE_EXTENSIONS:
+            # Only SceneLoaderPY3 gives the arguments to the scene: on any other scene
+            # they would be silently dropped, and the case would be a plain duplicate.
+            self.parsing_error(line_number, f"{ARGS_OPTION} is only supported for python scenes "
+                                            f"({', '.join(RegressionSceneData.PYTHON_SCENE_EXTENSIONS)}), "
+                                            f"got '{scene_extension}'. Skipping this scene.")
+            return None
+
         full_ref_file_path = os.path.normpath(os.path.join(self.ref_dir_path, values[0]))
+        if case_name is not None:
+            # This is what gives the case its own set of references, next to the ones
+            # of the other cases of the same scene.
+            full_ref_file_path = full_ref_file_path + "." + case_name
+
+        previous_line = self.used_ref_paths.get(full_ref_file_path)
+        if previous_line is not None:
+            self.parsing_error(line_number, f"references {full_ref_file_path} are already used by "
+                                            f"line {previous_line}. Give this case a distinct "
+                                            f"{CASE_OPTION} name. Skipping this scene.")
+            return None
+        self.used_ref_paths[full_ref_file_path] = line_number
 
         return RegressionSceneData.RegressionSceneData(full_file_path, full_ref_file_path,
                                                        steps, epsilon, meca_in_mapping, dump_number_step,
-                                                       self.disable_progress_bar, self.verbose)
+                                                       self.disable_progress_bar, self.verbose,
+                                                       case_name, scene_args)
 
 
     def process_file(self):
@@ -225,13 +343,13 @@ class RegressionSceneList:
 
         if task["mode"] == "write":
             if not result.get("ok", False):
-                helper.writeError(f"While writing references for {scene.file_scene_path}: {result.get('error')}")
+                helper.writeError(f"While writing references for {scene.describe()}: {result.get('error')}")
             return
 
         if not result.get("ok", False):
             # Hard failure (scene could not be loaded / worker crashed).
             self.nbr_errors = self.nbr_errors + 1
-            helper.writeError(f"While trying to compare {scene.file_scene_path}: {result.get('error')}")
+            helper.writeError(f"While trying to compare {scene.describe()}: {result.get('error')}")
             return
 
         # Bring the worker's outcome back so log_errors() reports it as usual.
@@ -253,7 +371,7 @@ class RegressionSceneList:
     def write_references(self, id_scene, print_log = False):
         scene = self.scenes_data_sets[id_scene]
         if self.verbose:
-            helper.writeLog(f'Writing reference files for {scene.file_scene_path}.')
+            helper.writeLog(f'Writing reference files for {scene.describe()}.')
 
         task = self.build_task(id_scene, "write")
         result = RegressionWorker.run_scene_in_subprocess(

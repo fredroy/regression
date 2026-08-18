@@ -30,6 +30,7 @@ Each following line of the list file must contain:
 3. A numerical epsilon for comparison 
 4. Set this value to 1 if mechanicalObject inside a mapped Node need to be tested. Otherwise 0.
 5. Set this value to 1 if only last iteration need to be dumped and tested. Otherwise 0.
+6. Optionally, the description of a *case*: `--case <name>` and `--args <arg> [<arg> ...]`. See below.
 
 See for example: SOFA_DIR/examples/RegressionStateScenes.regression-tests
 ```
@@ -46,6 +47,51 @@ Demos/liver.scn 100 1e-4 1 1
 See https://github.com/sofa-framework/regression/blob/ca388cf402244e5196d2b46da69ed2f5a92fbdb1/Regression_test/RegressionSceneList.cpp#L73 for the parsing code.
 
 
+### Testing the same scene with different arguments: cases ###
+By default one scene is one simulation, tested against one set of references. A scene can also be
+listed several times with different arguments; each of those runs is called a **case** and owns its
+own set of references.
+
+A case is declared with two optional trailing options on the scene line:
+- `--case <name>`: the name of the case. It is appended to the reference path, which is what makes
+  the references of this case distinct from the ones of the other runs of the same scene. Only
+  letters, digits, `_`, `.` and `-` are allowed.
+- `--args <arg> [<arg> ...]`: the arguments given to the scene. They are exposed to it as `sys.argv`,
+  `sys.argv[0]` being the name of the scene, exactly as when the scene is run by `runSofa`.
+
+```
+### References folder ###
+$REGRESSION_DIR/references/examples
+
+### The scene without arguments, then two cases of the same scene ###
+Demos/liver.py 100 1e-4 1 1
+Demos/liver.py 100 1e-4 1 1 --case stiff --args young=1000 poisson=0.4
+Demos/liver.py 100 1e-4 1 1 --case soft  --args young=100  poisson=0.3
+```
+
+The scene reads its arguments as it would any command line:
+```python
+import sys
+
+def createScene(root):
+    young = 1000
+    for arg in sys.argv[1:]:
+        if arg.startswith("young="):
+            young = float(arg.split("=")[1])
+    ...
+```
+
+Notes:
+- `--args` gathers every following field until the end of the line or the next option, so a scene
+  argument must never be spelled `--case` or `--args`.
+- `--args` requires `--case`: without a name, the case would write over the references of the scene
+  run without arguments.
+- `--args` is only supported for python scenes (`.py`, `.py3`, `.pyscn`, `.py3scn`); an XML scene
+  ignores its arguments, so listing one with `--args` is reported as an error.
+- `--case` may be used on its own, simply to give a run its own set of references.
+- Two lines of the same file may not end up on the same reference path; this is reported as an error.
+
+
 The class ```RegressionSceneList``` is used to parse folders and look for those files.
 Right now we have:
 - **State tests:** RegressionStateScenes.regression-tests
@@ -56,6 +102,14 @@ See section 4 to add a new type of test.
 ## 1.b - References
 Reference files are stored in this repository under the **References/** folder, with the same folder hiearchy as the target scenes.
 *For example, for Demo scenes inside SOFA, references will be stored inside **References/Demos/** *
+
+When the scene is run as a case (see 1.a), the name of the case is inserted between the name of the
+scene and the reference suffix, so that each case keeps its own set of references:
+```
+References/Demos/liver.py.reference_mstate_0_dofs.json.gz          # no argument
+References/Demos/liver.py.stiff.reference_mstate_0_dofs.json.gz    # --case stiff
+References/Demos/liver.py.soft.reference_mstate_0_dofs.json.gz     # --case soft
+```
 
 **The reference files are generated when running the test for the first time on a scene and must be manually added to this repository. See section 3.a.**
 

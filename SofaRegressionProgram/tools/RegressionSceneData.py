@@ -1,12 +1,21 @@
-import time
-import numpy as np
+import importlib.util
+import os
 import pathlib
+import sys
+import time
+
+import numpy as np
 
 import tools.ReferenceFileIO as reference_io
 import tools.RegressionHelper as helper
 import Sofa
 
 from tools import ProgressBarHandler as pbh
+
+
+## Extensions of the scenes that are loaded by SceneLoaderPY3, i.e. the only
+## ones that can be given arguments (an XML scene ignores them).
+PYTHON_SCENE_EXTENSIONS = (".py", ".py3", ".pyscn", ".py3scn")
 
 
 def is_simulated(node):
@@ -58,7 +67,8 @@ def is_mapped(node):
 
 class RegressionSceneData:
     def __init__(self, file_scene_path: str = None, file_ref_path: str = None, steps = 1000,
-                 epsilon = 0.0001, meca_in_mapping = True, dump_number_step = 1, disable_progress_bar = False, verbose = False):
+                 epsilon = 0.0001, meca_in_mapping = True, dump_number_step = 1, disable_progress_bar = False, verbose = False,
+                 case_name = None, scene_args = None):
         """
         /// Path to the file scene to test
         std::string m_fileScenePath;
@@ -72,6 +82,10 @@ class RegressionSceneData:
         bool m_mecaInMapping;
         /// Option to compare mechanicalObject dof position at each timestep
         bool m_dumpNumberStep;    
+        /// Name of the parameterized case of the scene, None when the scene is run without arguments
+        std::string m_caseName;
+        /// Arguments given to the scene, exposed to it as sys.argv
+        std::vector<std::string> m_sceneArgs;
         """
         self.file_scene_path = file_scene_path
         self.file_ref_path = file_ref_path
@@ -79,6 +93,11 @@ class RegressionSceneData:
         self.epsilon = float(epsilon)
         self.meca_in_mapping = bool(meca_in_mapping)
         self.dump_number_step = int(dump_number_step)
+        # A scene given arguments is a "case": it is the same scene file, run with
+        # different parameters, and it owns its own set of references. The case name
+        # is what makes those reference files distinct from the ones of the plain run.
+        self.case_name = case_name
+        self.scene_args = list(scene_args) if scene_args else []
         self.meca_objs = []
         self.filenames = []
         self.mins = []
@@ -92,21 +111,29 @@ class RegressionSceneData:
         self.verbose = verbose
         self.total_run_time = 0
 
+    def describe(self):
+        """Identify this scene in the logs, including its case when it is a parameterized run."""
+        if self.case_name is None:
+            return self.file_scene_path
+        return f"{self.file_scene_path} [case: {self.case_name}]"
+
     def print_info(self):
-        helper.writeLog("Test scene: " + self.file_scene_path + " vs " + self.file_ref_path + " using: " + str(self.steps)
+        helper.writeLog("Test scene: " + self.describe() + " vs " + self.file_ref_path + " using: " + str(self.steps)
               + " " + str(self.epsilon))
+        if self.scene_args:
+            helper.writeLog("  Scene arguments: " + " ".join(self.scene_args))
         
     def log_errors(self):
         if self.regression_failed:
             helper.writeError(
-                                f"{self.file_scene_path} | Number of key frames compared: {self.nbr_tested_frame}  | run time: {self.total_run_time/1e9} seconds. "
+                                f"{self.describe()} | Number of key frames compared: {self.nbr_tested_frame}  | run time: {self.total_run_time/1e9} seconds. "
                                 f"\n    ### Error by dof: {self.error_by_dof} > Threshold: {self.epsilon}"
                                 f"\n    ### Total Error: {self.total_error}"
                             )
         elif self.nbr_tested_frame == 0:
-            helper.writeError(f"No frames were tested for {self.file_scene_path}")
+            helper.writeError(f"No frames were tested for {self.describe()}")
         else:
-            helper.writeSuccess(f"{self.file_scene_path} | Number of key frames compared: {self.nbr_tested_frame} | run time: {self.total_run_time/1e9} seconds. ")
+            helper.writeSuccess(f"{self.describe()} | Number of key frames compared: {self.nbr_tested_frame} | run time: {self.total_run_time/1e9} seconds. ")
 
     def apply_worker_result(self, result):
         """Copy the fields reported by an isolated worker process back onto this
@@ -163,12 +190,60 @@ class RegressionSceneData:
             counter = counter+1
     
 
+    def load_scene_with_args(self):
+        """Load a python scene, exposing the arguments of the case to it as sys.argv.
+
+        The binding Sofa.Simulation.load() only takes a filename: it does not expose
+        the sceneArgs of the underlying C++ API. The work of SceneLoaderPY3 is
+        therefore reproduced here: sys.argv is set to the name of the scene followed
+        by the arguments of the case, then createScene() is called on a fresh root
+        node, from the directory of the scene so that the relative paths it uses
+        still resolve.
+
+        Returns:
+            Sofa.Core.Node: the root node of the loaded scene.
+        """
+        scene_path = os.path.abspath(self.file_scene_path)
+        module_name = os.path.splitext(os.path.basename(scene_path))[0]
+
+        # Like SceneLoaderPY3, sys.argv is left set after the scene has been built:
+        # a scene may also read its arguments outside of createScene(), for example
+        # from a controller. Each scene runs in its own process, so nothing else
+        # depends on sys.argv here.
+        sys.argv = [module_name] + self.scene_args
+
+        # The directory is only changed while the scene is built, as SceneLoaderPY3
+        # does: the rest of the program uses paths relative to the initial directory.
+        previous_dir = os.getcwd()
+        os.chdir(os.path.dirname(scene_path))
+        try:
+            spec = importlib.util.spec_from_file_location(module_name, scene_path)
+            module = importlib.util.module_from_spec(spec)
+            sys.modules[module_name] = module
+            spec.loader.exec_module(module)
+
+            if not hasattr(module, "createScene"):
+                raise RuntimeError(f"Missing createScene function in {scene_path}")
+
+            root_node = Sofa.Core.Node("root")
+            module.createScene(root_node)
+        finally:
+            os.chdir(previous_dir)
+
+        return root_node
+
+
     def load_scene(self, format = "JSON"):
         if self.verbose:
-            helper.writeLog(f"Loading scene: {self.file_scene_path}")
-        self.root_node = Sofa.Simulation.load(self.file_scene_path)
+            helper.writeLog(f"Loading scene: {self.describe()}")
+
+        if self.scene_args:
+            self.root_node = self.load_scene_with_args()
+        else:
+            self.root_node = Sofa.Simulation.load(self.file_scene_path)
+
         if not self.root_node: # error while loading
-            helper.writeError("While trying to load {self.file_scene_path}")
+            helper.writeError(f"While trying to load {self.describe()}")
             raise RuntimeError
         else:
             if self.verbose:

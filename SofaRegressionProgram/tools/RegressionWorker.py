@@ -94,6 +94,12 @@ def run_scene_in_subprocess(scene_data, mode, legacy=False,
         "--format", format,
         "--result-file", result_path,
     ]
+    if scene_data.case_name is not None:
+        cmd += ["--case", str(scene_data.case_name)]
+    # One option per argument: the arguments of a scene are arbitrary strings, and
+    # this keeps them out of reach of any quoting or splitting.
+    for scene_arg in scene_data.scene_args:
+        cmd += ["--scene-arg", str(scene_arg)]
     if legacy:
         cmd.append("--legacy")
     if verbose:
@@ -224,7 +230,7 @@ def run_scene_tasks(tasks, nbr_jobs=1, format="JSON", on_result=None,
                         task = futures[future]
                         result = future.result()
                         _echo_captured_output(
-                            f"--- {task['mode']}: {task['scene_data'].file_scene_path}", result)
+                            f"--- {task['mode']}: {task['scene_data'].describe()}", result)
                         if on_result is not None:
                             on_result(task, result)
                         pbar.update(1)
@@ -249,6 +255,8 @@ def _make_worker_parser():
     parser.add_argument("--epsilon", type=float, required=True)
     parser.add_argument("--meca-in-mapping", dest="meca_in_mapping", choices=["0", "1"], required=True)
     parser.add_argument("--dump-number-step", dest="dump_number_step", type=int, required=True)
+    parser.add_argument("--case", default=None)
+    parser.add_argument("--scene-arg", dest="scene_args", action="append", default=[])
     parser.add_argument("--format", default="JSON")
     parser.add_argument("--result-file", dest="result_file", required=True)
     parser.add_argument("--legacy", action="store_true")
@@ -288,6 +296,8 @@ def _worker_main():
             dump_number_step=args.dump_number_step,
             disable_progress_bar=args.disable_progress_bar,
             verbose=args.verbose,
+            case_name=args.case,
+            scene_args=args.scene_args,
         )
 
         scene.load_scene(args.format)
