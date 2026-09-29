@@ -449,6 +449,8 @@ class StateRegressionSceneData(RegressionSceneData):
 
         nbr_meca = len(self.meca_objs)
 
+        times = []
+
         # Reference data
         ref_times = []          # shared timeline
         ref_values = []         # List[List[np.ndarray]]
